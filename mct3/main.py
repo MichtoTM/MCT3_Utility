@@ -217,7 +217,7 @@ def virus_total_scan(file):
             stats = analysis_data["data"]["attributes"].get("stats", {})
             malicious = stats.get("malicious", 0)
             total = sum(stats.values())
-            click.echo(click.style(f"Analyse terminée : {malicious} détection(s) malveillante(s) sur {total} moteurs.", fg="green"))
+            click.echo(click.style(f"\nAnalyse terminée : {malicious} détection(s) malveillante(s) sur {total} moteurs.", fg="green"))
 
             # Facultatif : afficher les moteurs ayant détecté quelque chose
             results = analysis_data["data"]["attributes"].get("results", {})
@@ -228,7 +228,7 @@ def virus_total_scan(file):
         else:
             time.sleep(3)
             wait_time += 3
-            click.echo(f"En attente... ({wait_time} s)", nl=False)
+            click.echo(f"\rEn attente... ({wait_time} s)", nl=False)
 
 @cli.command("hash")
 @click.argument("file", type=click.Path(exists=True))
@@ -279,6 +279,29 @@ def remote_cmd(ip, key, shell, command):
     except ValueError:
         click.echo(click.style("Réponse invalide (pas du JSON)", fg="red"))
 
+@cli.command("stcfold")
+def stcfold():
+    """Lister tous les fichiers du répertoire"""
+    current_dir = os.getcwd()
+       
+    def walk(path, level=0):
+        entries = sorted(os.listdir(path))
+        for entry in entries:
+            full_path = os.path.join(path, entry)
+            indent = "  " * level
+            if os.path.isdir(full_path):
+                click.echo(f"{indent}{click.style(entry + '/', fg='white', bold=True)}")
+                walk(full_path, level + 1)
+            else:
+                click.echo(f"{indent}{click.style(entry, fg='green')}")
+
+        if not entries:
+            click.echo(click.style('Aucun fichier ou dossier trouvé.', fg='yellow'))
+
+        click.echo(click.style(f"La commande exécutée dans \"{current_dir}\" s'est terminée correctement.", fg="green", bold=True))
+    
+
+    walk(current_dir)
 # === LANCEMENT ===
 if __name__ == "__main__":
     cli()
