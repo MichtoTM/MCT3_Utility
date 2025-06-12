@@ -8,5 +8,5 @@ Follow instructions :
 
 * Clone the GIT,
 * Extract it in a safe place,
-* Add ```token.txt``` it must contain your VirusTotal api key,
+* Add ```token.txt``` in ```/mct3``` folder it must contain your VirusTotal api key,
 * Open a CMD and run ```pip install -e .```
