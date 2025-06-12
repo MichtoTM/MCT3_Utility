@@ -345,14 +345,17 @@ def split_file(file, size):
 
 @cli.command("assembly")
 @click.option("--output", default=None, help="Nom du fichier de sortie (facultatif).")
-def assembly(output):
+@click.option("--skip", default=False, is_flag=True, help="Ignorer la vérification du hash.")
+def assembly(output,skip):
     """Assemble les segments compressés LZMA et vérifie leur intégrité avec un SHA256"""
-    import lzma
-    import hashlib
-    import os
 
     folder = os.getcwd()
-    if not os.path.exists("hash.txt"):
+    
+    if skip:
+        click.echo(click.style("Vérification du hash ignorée.", fg="yellow"))
+        expected_hash = None
+    
+    elif not os.path.exists("hash.txt"):
         expected_hash = click.prompt("SHA256 attendu du fichier original", type=str)
 
     else:
@@ -383,19 +386,23 @@ def assembly(output):
                 while chunk := pf.read(8192):
                     out_f.write(chunk)
 
-    # Calcul du hash SHA256
-    h = hashlib.sha256()
-    with open(output_path, 'rb') as f:
-        while chunk := f.read(8192):
-            h.update(chunk)
-    result_hash = h.hexdigest()
-
-    if result_hash == expected_hash.lower():
-        click.echo(click.style("Fichier reconstruit avec succès. Intégrité vérifié.", fg="green", bold=True))
+    if expected_hash is None:
+        return
+    
     else:
-        click.echo(click.style("Le hash ne correspond pas. Fichier corrompu ?", fg="red", bold=True))
-        click.echo(f"Attendu : {expected_hash.lower()}")
-        click.echo(f"Obtenu  : {result_hash}")
+        # Calcul du hash SHA256
+        h = hashlib.sha256()
+        with open(output_path, 'rb') as f:
+            while chunk := f.read(8192):
+                h.update(chunk)
+        result_hash = h.hexdigest()
+
+        if result_hash == expected_hash.lower():
+            click.echo(click.style("Fichier reconstruit avec succès. Intégrité vérifié.", fg="green", bold=True))
+        else:
+            click.echo(click.style("Le hash ne correspond pas. Fichier corrompu ?", fg="red", bold=True))
+            click.echo(f"Attendu : {expected_hash.lower()}")
+            click.echo(f"Obtenu  : {result_hash}")
 
 # === LANCEMENT ===
 if __name__ == "__main__":
