@@ -2,6 +2,7 @@ import click
 import eyed3
 import os
 import hashlib
+import lzma
 
 @click.group()
 def cli():
@@ -302,6 +303,100 @@ def stcfold():
     
 
     walk(current_dir)
+
+@cli.command("split")
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--size", default=10, show_default=True, help="Taille max d’un segment en Mo.")
+def split_file(file, size):
+    """Split a file in 10MO segments using LZMA"""
+    #show the original hash
+    algo = 'sha256'  # sha256 par défaut
+    h = hashlib.new(algo)
+
+    with open(file, 'rb') as f:
+        chunk = f.read(8192)
+        while chunk:
+            h.update(chunk)
+            chunk = f.read(8192)
+
+    click.echo(click.style(f"{algo.upper()} : {h.hexdigest()}", fg="green"))
+    
+    #split the file
+    CHUNK_SIZE = size * 1024 * 1024  # 10 MB
+    base_name = os.path.basename(file)
+    output_dir = f"{base_name}_splits"
+    os.makedirs(output_dir, exist_ok=True)
+    #save hah.txt ion the new folder
+    with open(os.path.join(output_dir, "hash.txt"), "w") as f:
+        f.write(h.hexdigest())
+
+    with open(file, "rb") as f:
+        index = 0
+        while chunk := f.read(CHUNK_SIZE):
+            compressed_chunk = lzma.compress(chunk)
+            part_path = os.path.join(output_dir, f"{base_name}.part{index:03d}.xz")
+            with open(part_path, "wb") as part:
+                part.write(compressed_chunk)
+            click.echo(f"Segment {index+1} créé : {part_path}")
+            index += 1
+
+    click.echo(click.style("Découpage terminé.", fg="green"))
+
+
+@cli.command("assembly")
+@click.option("--output", default=None, help="Nom du fichier de sortie (facultatif).")
+def assembly(output):
+    """Assemble les segments compressés LZMA et vérifie leur intégrité avec un SHA256"""
+    import lzma
+    import hashlib
+    import os
+
+    folder = os.getcwd()
+    if not os.path.exists("hash.txt"):
+        expected_hash = click.prompt("SHA256 attendu du fichier original", type=str)
+
+    else:
+        with open(os.path.join(folder, "hash.txt"), "r") as f:
+            expected_hash = f.read()
+    
+    # Lister et trier les fichiers .xz
+    part_files = sorted(
+        [f for f in os.listdir(folder) if f.endswith(".xz")],
+        key=lambda x: int(x.split(".part")[1].split(".")[0])
+    )
+
+    if not part_files:
+        click.echo(click.style("Aucun segment .xz trouvé dans le dossier.", fg="red"))
+        return
+
+    # Deviner le nom du fichier de base à partir du premier segment
+    base_name = part_files[0].split(".part")[0]
+    output_name = output if output else base_name
+    output_path = os.path.join(os.getcwd(), output_name)
+
+    click.echo(f"Assemblage des segments vers : {output_path}")
+
+    with open(output_path, "wb") as out_f:
+        for part in part_files:
+            part_path = os.path.join(folder, part)
+            with lzma.open(part_path, "rb") as pf:
+                while chunk := pf.read(8192):
+                    out_f.write(chunk)
+
+    # Calcul du hash SHA256
+    h = hashlib.sha256()
+    with open(output_path, 'rb') as f:
+        while chunk := f.read(8192):
+            h.update(chunk)
+    result_hash = h.hexdigest()
+
+    if result_hash == expected_hash.lower():
+        click.echo(click.style("Fichier reconstruit avec succès. Intégrité vérifié.", fg="green", bold=True))
+    else:
+        click.echo(click.style("Le hash ne correspond pas. Fichier corrompu ?", fg="red", bold=True))
+        click.echo(f"Attendu : {expected_hash.lower()}")
+        click.echo(f"Obtenu  : {result_hash}")
+
 # === LANCEMENT ===
 if __name__ == "__main__":
     cli()
