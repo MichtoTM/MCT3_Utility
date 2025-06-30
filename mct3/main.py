@@ -6,13 +6,13 @@ import lzma
 
 @click.group()
 def cli():
-    """MCT3 Utilitaire en lignes de commandes pour modifier les métadonnées MP3 et analyser des fichiers."""
+    """MCT3 Utilitary Tool for cmd and powershell."""
     pass
 
 # === METADATA ===
 @cli.group()
 def metadata():
-    """Lire les métadonnées"""
+    """Read MP3 metadata."""
     pass
 
 @metadata.command("read")
@@ -20,7 +20,7 @@ def metadata():
 def read_metadata(audio_file):
     audio = eyed3.load(audio_file)
     if audio.tag is None:
-        click.echo("Aucune métadonnée trouvée.")
+        click.echo(click.style("No metadata found."),fg='yellow')
         return
 
     click.echo(f"Titre : {audio.tag.title}")
@@ -37,17 +37,17 @@ def read_metadata(audio_file):
         for lyric in audio.tag.lyrics:
             click.echo(f"\nParoles :\n{lyric.text}")
     else:
-        click.echo("Aucune parole trouvée.")
+        click.echo(click.style("No lyrics found."),fg='yellow')
 
     if audio.tag.images:
         click.echo(f"Nombre d'images : {len(audio.tag.images)}")
     else:
-        click.echo("Aucune image de pochette.")
+        click.echo(click.style("Aucune image de pochette."),fg='yellow')
 
 # === COVER ===
 @cli.group()
 def cover():
-    """Ajouter ou supprimer une pochette"""
+    """Add or remove a MP3 cover."""
     pass
 
 @cover.command("add")
@@ -107,7 +107,7 @@ def remove_cover(audio_file):
 # === LYRICS ===
 @cli.group()
 def lyrics():
-    """Ajouter ou supprimer des paroles"""
+    """Add or remove MP3 lyrics."""
     pass
 
 @lyrics.command("add")
@@ -404,6 +404,33 @@ def assembly(output,skip):
             click.echo(f"Attendu : {expected_hash.lower()}")
             click.echo(f"Obtenu  : {result_hash}")
 
+@cli.command("xyz")
+@click.argument("data1", type=str)
+@click.argument("data2", type=str)
+
+def xyz(data1, data2):
+    """Calculer la distance entre deux points 3D."""
+    import math
+    import re
+
+    def get_distance(data1, data2):
+        data1 = re.split(r'[;,]', data1)
+        data2 = re.split(r'[;,]', data2)
+
+        if len(data1) == 3 and len(data2) == 3:
+            x1, y1, z1 = float(data1[0]), float(data1[1]), float(data1[2])
+            x2, y2, z2 = float(data2[0]), float(data2[1]), float(data2[2])
+
+            distance = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2 + (z2 - z1) ** 2)
+            return distance
+        else:
+            raise ValueError("Les données doivent contenir trois coordonnées.")
+
+    try:
+        distance = get_distance(data1, data2)
+        click.echo(click.style(f"Distance : {distance:.4f}", fg="green"))
+    except ValueError as e:
+        click.echo(click.style(f"Erreur : {e}", fg="red"))
 # === LANCEMENT ===
 if __name__ == "__main__":
     cli()
