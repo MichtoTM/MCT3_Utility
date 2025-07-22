@@ -4,6 +4,11 @@ import os
 import hashlib
 import lzma
 
+import requests
+import time
+import json
+from pathlib import Path
+
 @click.group()
 def cli():
     """MCT3 Utilitary Tool for cmd and powershell."""
@@ -165,12 +170,7 @@ def remove_lyrics(audio_file):
 
 
 def virus_total_scan(file):
-    """Analyser un fichier avec VirusTotal"""
-    import requests
-    import time
-    import json
-    from pathlib import Path
-    
+    """Analyser un fichier avec VirusTotal"""    
     try:
         token_path = Path(__file__).parent / "token.txt"
         with open(token_path, "r", encoding="utf-8") as token_file:
@@ -421,7 +421,31 @@ def emjspam(char, range, separator, last):
         result = result.rstrip(separator) 
     
     click.echo(click.style(result, fg="green"))
-                
+
+
+@cli.command("version")
+@click.option("--debug", is_flag=True, help="Afficher les messages d'erreur détaillés.")
+def version(debug):
+    """Afficher la version de MCT."""
+    version_file = Path(__file__).parent / "version"
+    version_str = None
+
+    try:
+        with open(version_file, "r", encoding="utf-8") as f:
+            version_str = f.read().strip()
+    except Exception as e:
+        if debug:
+            click.echo(click.style(f"Erreur lors de la lecture de la version : {e}", fg="red"))
+
+    if version_str:
+        click.echo(click.style(f"MCT Version: {version_str}", fg="blue"))
+    else:
+        click.echo(click.style(
+            "Version non trouvée. Package probablement modifié ou corrompu, réinstallation recommandée.",
+            fg="red"
+        ))
+
+
 # === LANCEMENT ===
 if __name__ == "__main__":
     cli()
