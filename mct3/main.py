@@ -252,35 +252,6 @@ def hash_file(file, algo):
     click.echo(click.style(f"{algo.upper()} : {h.hexdigest()}", fg="green"))
 
 
-@cli.command("remote-cmd")
-@click.option("--ip", required=True, help="Adresse IP ou domaine du PC distant (ex: 192.168.1.23)")
-@click.option("--key", required=True, help="Clé secrète d'authentification")
-@click.option("--shell", type=click.Choice(['cmd', 'powershell']), default='cmd', show_default=True, help="Shell à utiliser")
-@click.option("--command", required=True, help="Commande à exécuter")
-def remote_cmd(ip, key, shell, command):
-    """Envoyer une commande à un PC distant via HTTP (serveur Flask)"""
-    import requests
-
-    url = f"http://{ip}:5000/run"
-    params = {
-        "key": key,
-        "cmd": command,
-        "shell": shell
-    }
-
-    click.echo(click.style(f"Envoi de la commande vers {ip}...", fg="cyan"))
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        output = data.get("output", "Aucune sortie")
-        click.echo(click.style("Réponse du serveur :", fg="green"))
-        click.echo(output)
-    except requests.RequestException as e:
-        click.echo(click.style(f"Erreur lors de la requête : {e}", fg="red"))
-    except ValueError:
-        click.echo(click.style("Réponse invalide (pas du JSON)", fg="red"))
-
 # === STCFOLD ===
 @cli.command("stcfold")
 def stcfold():
@@ -307,7 +278,6 @@ def stcfold():
     walk(current_dir)
 
 # === SPLIT AND ASSEMBLY ===
-
 @cli.command("split")
 @click.argument("file", type=click.Path(exists=True))
 @click.option("--size", default=10, show_default=True, help="Taille max d’un segment en Mo.")
