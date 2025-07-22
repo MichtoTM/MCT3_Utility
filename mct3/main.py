@@ -159,9 +159,9 @@ def remove_lyrics(audio_file):
 
 
 # === VTSCAN ===
+
 @cli.command("vtscan")
 @click.argument("file", type=click.Path(exists=True))
-
 
 
 def virus_total_scan(file):
@@ -231,6 +231,7 @@ def virus_total_scan(file):
             wait_time += 3
             click.echo(f"\rEn attente... ({wait_time} s)", nl=False)
 
+# === HASH ===
 @cli.command("hash")
 @click.argument("file", type=click.Path(exists=True))
 @click.option('--sha1', 'algo', flag_value='sha1', help="Utiliser SHA1")
@@ -280,6 +281,7 @@ def remote_cmd(ip, key, shell, command):
     except ValueError:
         click.echo(click.style("Réponse invalide (pas du JSON)", fg="red"))
 
+# === STCFOLD ===
 @cli.command("stcfold")
 def stcfold():
     """Lister tous les fichiers du répertoire"""
@@ -303,6 +305,8 @@ def stcfold():
     
 
     walk(current_dir)
+
+# === SPLIT AND ASSEMBLY ===
 
 @cli.command("split")
 @click.argument("file", type=click.Path(exists=True))
@@ -404,6 +408,7 @@ def assembly(output,skip):
             click.echo(f"Attendu : {expected_hash.lower()}")
             click.echo(f"Obtenu  : {result_hash}")
 
+# === XYZ ===
 @cli.command("xyz")
 @click.argument("data1", type=str)
 @click.argument("data2", type=str)
@@ -431,6 +436,22 @@ def xyz(data1, data2):
         click.echo(click.style(f"Distance : {distance:.4f}", fg="green"))
     except ValueError as e:
         click.echo(click.style(f"Erreur : {e}", fg="red"))
+
+# === SPAM ===
+@cli.command("emjspam")
+@click.argument("char", type=str)
+@click.argument("range", type=int)
+@click.option("--separator", default="", help="Séparateur entre les caractères.")
+@click.option("--last", is_flag=True, help="Conserver le dernier caractère.")
+
+def emjspam(char, range, separator, last):
+    """Répéter une chaîne de caractères."""
+    result = (char + separator) * range
+    if not last:
+        result = result.rstrip(separator) 
+    
+    click.echo(click.style(result, fg="green"))
+                
 # === LANCEMENT ===
 if __name__ == "__main__":
     cli()
