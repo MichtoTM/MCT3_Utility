@@ -6,7 +6,6 @@ import lzma
 
 import requests
 import time
-import json
 from pathlib import Path
 
 @click.group()
@@ -238,7 +237,8 @@ def virus_total_scan(file):
 @click.option('--sha256', 'algo', flag_value='sha256', help="Utiliser SHA256 (défaut)")
 @click.option('--sha512', 'algo', flag_value='sha512', help="Utiliser SHA512")
 @click.option('--md5', 'algo', flag_value='md5', help="Utiliser MD5")
-def hash_file(file, algo):
+@click.option('--compare', type=str, help="Comparer avec un hash existant")
+def hash_file(file, algo, compare):
     """Calculer le hash d'un fichier en utilisant un algorithme choisi."""
     algo = algo or 'sha256'  # sha256 par défaut
     h = hashlib.new(algo)
@@ -248,8 +248,17 @@ def hash_file(file, algo):
         while chunk:
             h.update(chunk)
             chunk = f.read(8192)
-
-    click.echo(click.style(f"{algo.upper()} : {h.hexdigest()}", fg="green"))
+    
+       
+    if h.hexdigest() == compare:
+        click.echo(click.style(f"{algo.upper()} : {h.hexdigest()}", fg="green"))
+        click.echo(click.style(f"Hash similaires.", fg="green", bold=True))
+    elif compare is not None:
+        click.echo(click.style(f"Hash différents :", fg="red", bold=True))
+        click.echo(click.style(f"Attendu : {compare}", fg="yellow"))
+        click.echo(click.style(f"Obtenu  : {h.hexdigest()}", fg="yellow"))
+    else:
+        click.echo(click.style(f"{algo.upper()} : {h.hexdigest()}", fg="green"))
 
 
 # === STCFOLD ===
