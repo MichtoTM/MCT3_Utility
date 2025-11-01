@@ -10,3 +10,5 @@ Follow instructions :
 * Extract it in a safe place,
 * Add ```token.txt``` in ```/mct3``` folder it must contain your VirusTotal api key,
 * Open a CMD and run ```pip install -e .```
+
+### Please note that to run flac2mp3, you will need to add FFmpeg to the Windows path.
