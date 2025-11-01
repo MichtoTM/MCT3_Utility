@@ -454,6 +454,60 @@ def version(debug):
             fg="red"
         ))
 
+# === FLAC TO MP3 ===
+from pathlib import Path
+import subprocess
+
+@cli.command("flac2mp3")
+@click.argument("source", required=False, type=click.Path(exists=True))
+@click.option("--bitrate", default="320k", show_default=True, help="Bitrate du MP3 final")
+@click.option("--recursive", is_flag=True, help="Parcourir les sous-dossiers")
+def flac2mp3(source, bitrate, recursive):
+    """
+    Convertir un FLAC en MP3 en conservant tags et pochette.
+    Sans SOURCE, convertit tous les FLAC du dossier courant.
+    """
+    current_dir = Path.cwd()
+    
+    # Déterminer les fichiers à convertir
+    if source:
+        flac_files = [Path(source)]
+    else:
+        flac_files = list(current_dir.rglob("*.flac")) if recursive else list(current_dir.glob("*.flac"))
+
+    if not flac_files:
+        click.echo(click.style("Aucun fichier FLAC trouvé.", fg="yellow"))
+        return
+
+    click.echo(click.style(f"{len(flac_files)} fichier(s) FLAC à convertir.", fg="cyan"))
+
+    for flac_path in flac_files:
+        mp3_path = flac_path.with_suffix(".mp3")
+
+        # Construction de la commande FFmpeg
+        cmd = [
+            "ffmpeg",
+            "-y",                      # écrase sans demander
+            "-i", str(flac_path),      # fichier source
+            "-map", "0:a",             # map audio
+            "-c:a", "libmp3lame",      # encodeur MP3
+            "-b:a", bitrate,           # bitrate
+            "-map", "0:v?",            # map video (pochette) si existante
+            "-c:v", "copy",            # copie le flux image tel quel
+            "-id3v2_version", "3",     # ID3v2.3
+            "-write_id3v1", "1",       # écrit ID3v1
+            str(mp3_path)
+        ]
+
+        # Exécution de FFmpeg
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            click.echo(click.style(f"Erreur lors de la conversion de {flac_path.name} :", fg="red"))
+            click.echo(result.stderr)
+        else:
+            click.echo(click.style(f"✓ {flac_path.name} converti avec succès.", fg="green"))
+
+    click.echo(click.style("Conversion terminée.", fg="cyan"))
 
 # === LANCEMENT ===
 if __name__ == "__main__":

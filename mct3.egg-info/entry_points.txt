@@ -1,0 +1,2 @@
+[console_scripts]
+mct3 = mct3.main:cli
