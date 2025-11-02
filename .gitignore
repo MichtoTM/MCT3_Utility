@@ -2,7 +2,7 @@ __pycache__/
 *.py[cod]
 commandcurl.py
 v0.5.py
-.egg-info/
+mct3.egg-info/
 *.log
 *.tmp
 *.bak
