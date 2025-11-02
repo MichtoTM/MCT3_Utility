@@ -1,5 +1,4 @@
 import click
-import eyed3
 import os
 import hashlib
 import lzma
@@ -13,154 +12,234 @@ def cli():
     """MCT3 Utilitary Tool for cmd and powershell."""
     pass
 
+from mutagen.easyid3 import EasyID3
+from mutagen.id3 import ID3, APIC, USLT, ID3NoHeaderError
+from mutagen.flac import FLAC, Picture
+
 # === METADATA ===
 @cli.group()
 def metadata():
-    """Read MP3 of FLAC metadata."""
+    """Read MP3 or FLAC metadata."""
     pass
+
 
 @metadata.command("read")
 @click.argument("audio_file")
 def read_metadata(audio_file):
-    audio = eyed3.load(audio_file)
-    if audio.tag is None:
-        click.echo(click.style("No metadata found."),fg='yellow')
+    """Display metadata information from an audio file."""
+    if not os.path.isfile(audio_file):
+        click.echo(click.style("File not found.", fg="red"))
         return
 
-    click.echo(f"Titre : {audio.tag.title}")
-    click.echo(f"Artiste : {audio.tag.artist}")
-    click.echo(f"Album : {audio.tag.album}")
-    click.echo(f"Année : {audio.tag.getBestDate()}")
-    click.echo(f"Genre : {audio.tag.genre.name if audio.tag.genre else 'Inconnu'}")
-    click.echo(f"Numéro de piste : {audio.tag.track_num}\n")  # Modification ici pour ajouter le saut de ligne
-    click.echo("Commentaires :", nl=False)
-    for c in audio.tag.comments:
-        click.echo(f" {c.text}")
+    ext = os.path.splitext(audio_file)[1].lower()
 
-    if audio.tag.lyrics:
-        for lyric in audio.tag.lyrics:
-            click.echo(f"\nParoles :\n{lyric.text}")
-    else:
-        click.echo(click.style("No lyrics found."),fg='yellow')
+    try:
+        if ext == ".mp3":
+            audio = ID3(audio_file)
+        elif ext == ".flac":
+            audio = FLAC(audio_file)
+        else:
+            click.echo(click.style("Unsupported format. Only MP3 and FLAC are supported.", fg="red"))
+            return
+    except Exception as e:
+        click.echo(click.style(f"Error reading file: {e}", fg="red"))
+        return
 
-    if audio.tag.images:
-        click.echo(f"Nombre d'images : {len(audio.tag.images)}")
-    else:
-        click.echo(click.style("Aucune image de pochette."),fg='yellow')
+    click.echo(click.style(f"\nMetadata for {os.path.basename(audio_file)}:\n", bold=True))
+
+    # General tags
+    if ext == ".mp3":
+        for tag in ["TIT2", "TPE1", "TALB", "TDRC", "TCON", "TRCK"]:
+            if tag in audio:
+                click.echo(f"{tag}: {audio[tag].text[0]}")
+        comments = [frame.text for frame in audio.getall("COMM")]
+        if comments:
+            click.echo(f"Comments: {' | '.join(comments)}")
+    elif ext == ".flac":
+        for key, value in audio.tags.items():
+            click.echo(f"{key}: {', '.join(value)}")
+
+    # Lyrics
+    if ext == ".mp3":
+        lyrics = [frame.text for frame in audio.getall("USLT")]
+        if lyrics:
+            click.echo("\nLyrics:\n" + lyrics[0])
+        else:
+            click.echo(click.style("No lyrics found.", fg="yellow"))
+    elif ext == ".flac":
+        if "lyrics" in audio.tags:
+            click.echo("\nLyrics:\n" + audio.tags["lyrics"][0])
+        else:
+            click.echo(click.style("No lyrics found.", fg="yellow"))
+
+    # Cover image
+    has_cover = False
+    if ext == ".mp3":
+        if audio.getall("APIC"):
+            has_cover = True
+    elif ext == ".flac":
+        if audio.pictures:
+            has_cover = True
+
+    click.echo(f"\nCover art: {'found' if has_cover else 'not found'}")
+
 
 # === COVER ===
 @cli.group()
 def cover():
-    """Add or remove a music file cover."""
+    """Add or remove cover art from a music file."""
     pass
+
 
 @cover.command("add")
 @click.argument("audio_file")
-@click.option("--image", required=True, help="Image à ajouter (.jpg/.png)")
+@click.option("--image", required=True, help="Path to the image (.jpg or .png).")
 def add_cover(audio_file, image):
+    """Attach a cover image to an MP3 or FLAC file."""
     if not os.path.isfile(audio_file) or not os.path.isfile(image):
-        click.echo(click.style("Fichier audio ou image introuvable.", fg="red"))
+        click.echo(click.style("Audio or image file not found.", fg="red"))
         return
 
-    ext = os.path.splitext(image)[1].lower()
-    mime = "image/jpeg" if ext in [".jpg", ".jpeg"] else "image/png" if ext == ".png" else None
+    ext = os.path.splitext(audio_file)[1].lower()
+    img_ext = os.path.splitext(image)[1].lower()
 
+    mime = (
+        "image/jpeg" if img_ext in [".jpg", ".jpeg"]
+        else "image/png" if img_ext == ".png"
+        else None
+    )
     if not mime:
-        click.echo(click.style("Format d'image non supporté.", fg="red"))
+        click.echo(click.style("Unsupported image format.", fg="red"))
         return
 
-    audio = eyed3.load(audio_file)
-    if not audio:
-        click.echo(click.style("Fichier audio non valide.", fg="red"))
-        return
+    try:
+        if ext == ".mp3":
+            try:
+                audio = ID3(audio_file)
+            except ID3NoHeaderError:
+                audio = ID3()
+            with open(image, "rb") as img_data:
+                audio.add(APIC(encoding=3, mime=mime, type=3, desc="Cover", data=img_data.read()))
+            audio.save(audio_file)
+        elif ext == ".flac":
+            audio = FLAC(audio_file)
+            pic = Picture()
+            pic.type = 3
+            pic.mime = mime
+            with open(image, "rb") as img_data:
+                pic.data = img_data.read()
+            audio.add_picture(pic)
+            audio.save()
+        else:
+            click.echo(click.style("Unsupported format. Only MP3 and FLAC are supported.", fg="red"))
+            return
 
-    if audio.tag is None:
-        audio.initTag()
+        click.echo(click.style("Cover art added successfully.", fg="green"))
+    except Exception as e:
+        click.echo(click.style(f"Error adding cover: {e}", fg="red"))
 
-    with open(image, "rb") as img:
-        audio.tag.images.set(3, img.read(), mime, u"cover")
-
-    audio.tag.save()
-    click.echo(click.style("Pochette ajoutée avec succès.", fg="green"))
 
 @cover.command("remove")
 @click.argument("audio_file")
 def remove_cover(audio_file):
+    """Remove cover art from an MP3 or FLAC file."""
     if not os.path.isfile(audio_file):
-        click.echo(click.style("Fihier introuvable.", fg="red"))
+        click.echo(click.style("File not found.", fg="red"))
         return
-    try:
-        # Charger le fichier MP3
-        audio = eyed3.load(audio_file)
 
-        # Vérifier si le fichier a des tags
-        if audio.tag is None:
-            click.echo("Aucune métadonnée trouvée.")
+    ext = os.path.splitext(audio_file)[1].lower()
+
+    try:
+        if ext == ".mp3":
+            audio = ID3(audio_file)
+            audio.delall("APIC")
+            audio.save()
+        elif ext == ".flac":
+            audio = FLAC(audio_file)
+            audio.clear_pictures()
+            audio.save()
+        else:
+            click.echo(click.style("Unsupported format. Only MP3 and FLAC are supported.", fg="red"))
             return
 
-        # Supprimer toutes les images de couverture
-        if audio.tag.images:
-            for img in audio.tag.images:
-                audio.tag.images.remove(img.description)  # Supprime chaque image par sa description
-            audio.tag.save()
-            click.echo(click.style("Pochette supprimée.", fg="green"))
-        else:
-            click.echo(click.style("Aucune pochette à supprimer.", fg="yellow"))
+        click.echo(click.style("Cover art removed successfully.", fg="green"))
     except Exception as e:
-        click.echo(click.style(f"Erreur lors de la suppression de la pochette : {e}",fg="red"))
+        click.echo(click.style(f"Error removing cover: {e}", fg="red"))
+
+
 # === LYRICS ===
 @cli.group()
 def lyrics():
-    """Add or remove MP3 lyrics."""
+    """Add or remove lyrics from MP3 or FLAC files."""
     pass
+
 
 @lyrics.command("add")
 @click.argument("audio_file")
-@click.option("--lyrics", required=True, help="Fichier .txt ou .lrc à ajouter")
+@click.option("--lyrics", required=True, help="Path to a .txt or .lrc file containing lyrics.")
 def add_lyrics(audio_file, lyrics):
+    """Attach lyrics text to an audio file."""
     if not os.path.isfile(audio_file) or not os.path.isfile(lyrics):
-        click.echo(click.style("Fichier audio ou paroles introuvable.",fg="red"))
+        click.echo(click.style("Audio or lyrics file not found.", fg="red"))
         return
 
     try:
         with open(lyrics, "r", encoding="utf-8") as f:
             lyrics_text = f.read()
     except Exception as e:
-        click.echo(click.style(f"Erreur lors de la lecture des paroles : {e}",fg="red"))
+        click.echo(click.style(f"Error reading lyrics: {e}", fg="red"))
         return
 
-    audio = eyed3.load(audio_file)
-    if not audio:
-        click.echo(click.style("Fichier audio non valide.",fg="red"))
-        return
+    ext = os.path.splitext(audio_file)[1].lower()
 
-    if audio.tag is None:
-        audio.initTag()
+    try:
+        if ext == ".mp3":
+            try:
+                audio = ID3(audio_file)
+            except ID3NoHeaderError:
+                audio = ID3()
+            audio.add(USLT(encoding=3, lang="eng", desc="Lyrics", text=lyrics_text))
+            audio.save(audio_file)
+        elif ext == ".flac":
+            audio = FLAC(audio_file)
+            audio["lyrics"] = lyrics_text
+            audio.save()
+        else:
+            click.echo(click.style("Unsupported format. Only MP3 and FLAC are supported.", fg="red"))
+            return
 
-    audio.tag.lyrics.set(lyrics_text)
-    audio.tag.save()
-    click.echo(click.style("Paroles ajoutées avec succès.",fg="green"))
+        click.echo(click.style("Lyrics added successfully.", fg="green"))
+    except Exception as e:
+        click.echo(click.style(f"Error adding lyrics: {e}", fg="red"))
+
 
 @lyrics.command("remove")
 @click.argument("audio_file")
 def remove_lyrics(audio_file):
+    """Remove lyrics from an MP3 or FLAC file."""
     if not os.path.isfile(audio_file):
-        click.echo(click.style("Fichier introuvable.", fg="red"))
+        click.echo(click.style("File not found.", fg="red"))
         return
 
-    audio = eyed3.load(audio_file)
-    if not audio or audio.tag is None or not audio.tag.lyrics:
-        click.echo(click.style("Aucune parole à supprimer.", fg="yellow"))
-        return
+    ext = os.path.splitext(audio_file)[1].lower()
 
-    # Suppression explicite de chaque objet lyrics par sa description (même vide)
-    for lyric in list(audio.tag.lyrics):
-        desc = lyric.description if lyric.description else ""
-        audio.tag.lyrics.remove(desc)
+    try:
+        if ext == ".mp3":
+            audio = ID3(audio_file)
+            audio.delall("USLT")
+            audio.save()
+        elif ext == ".flac":
+            audio = FLAC(audio_file)
+            if "lyrics" in audio:
+                del audio["lyrics"]
+            audio.save()
+        else:
+            click.echo(click.style("Unsupported format. Only MP3 and FLAC are supported.", fg="red"))
+            return
 
-    audio.tag.save()
-    click.echo(click.style("Paroles supprimées.", fg="green"))
-
+        click.echo(click.style("Lyrics removed successfully.", fg="green"))
+    except Exception as e:
+        click.echo(click.style(f"Error removing lyrics: {e}", fg="red"))
 
 # === VTSCAN ===
 
