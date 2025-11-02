@@ -263,28 +263,45 @@ def hash_file(file, algo, compare):
 
 # === STCFOLD ===
 @cli.command("stcfold")
-def stcfold():
-    """List all files of a directory in a tree structure."""
+@click.option("--depth", default=None, type=int, help="Maximum depth to display (e.g., 2).")
+@click.option("--folders-only", is_flag=True, help="Show only folders (hide files).")
+def stcfold(depth, folders_only):
+    """Display directory contents as a tree structure."""
     current_dir = os.getcwd()
-       
-    def walk(path, level=0):
-        entries = sorted(os.listdir(path))
-        for entry in entries:
+    base_name = os.path.basename(current_dir)
+
+    def walk(path, prefix="", level=0):
+        if depth is not None and level >= depth:
+            return
+
+        try:
+            entries = sorted(os.listdir(path))
+        except PermissionError:
+            click.echo(f"{prefix}└── [Access denied]")
+            return
+
+        entries_count = len(entries)
+        for index, entry in enumerate(entries):
             full_path = os.path.join(path, entry)
-            indent = "  " * level
+            connector = "└── " if index == entries_count - 1 else "├── "
+
             if os.path.isdir(full_path):
-                click.echo(f"{indent}{click.style(entry + '/', fg='white', bold=True)}")
-                walk(full_path, level + 1)
-            else:
-                click.echo(f"{indent}{click.style(entry, fg='green')}")
+                click.echo(f"{prefix}{connector}{click.style('📁 ' + entry + '/', fg='white', bold=True)}")
+                new_prefix = prefix + ("    " if index == entries_count - 1 else "│   ")
+                walk(full_path, new_prefix, level + 1)
+            elif not folders_only:
+                click.echo(f"{prefix}{connector}{click.style(entry, fg='green')}")
 
-        if not entries:
-            click.echo(click.style('Aucun fichier ou dossier trouvé.', fg='yellow'))
+    # Header
+    click.echo(click.style(f"📁 {base_name}/", fg="white", bold=True))
+    click.echo("│")
 
-        click.echo(click.style(f"La commande exécutée dans \"{current_dir}\" s'est terminée correctement.", fg="green", bold=True))
-    
-
+    # Walk directory
     walk(current_dir)
+
+    # Footer
+    click.echo()
+    click.echo(click.style(f"Command executed successfully in \"{current_dir}\".", fg="green", bold=True))
 
 # === SPLIT AND ASSEMBLY ===
 @cli.command("split")
