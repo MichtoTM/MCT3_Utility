@@ -1,8 +1,0 @@
-Metadata-Version: 2.4
-Name: mct3
-Version: 1.0.0
-License-File: LICENSE
-Requires-Dist: eyed3
-Requires-Dist: click
-Dynamic: license-file
-Dynamic: requires-dist
