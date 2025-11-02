@@ -16,7 +16,7 @@ def cli():
 # === METADATA ===
 @cli.group()
 def metadata():
-    """Read MP3 metadata."""
+    """Read MP3 of FLAC metadata."""
     pass
 
 @metadata.command("read")
@@ -51,7 +51,7 @@ def read_metadata(audio_file):
 # === COVER ===
 @cli.group()
 def cover():
-    """Add or remove a MP3 cover."""
+    """Add or remove a music file cover."""
     pass
 
 @cover.command("add")
@@ -169,7 +169,7 @@ def remove_lyrics(audio_file):
 
 
 def virus_total_scan(file):
-    """Analyser un fichier avec VirusTotal"""    
+    """Analyse a file with VirusTotal API."""    
     try:
         token_path = Path(__file__).parent / "token.txt"
         with open(token_path, "r", encoding="utf-8") as token_file:
@@ -239,7 +239,7 @@ def virus_total_scan(file):
 @click.option('--md5', 'algo', flag_value='md5', help="Utiliser MD5")
 @click.option('--compare', type=str, help="Comparer avec un hash existant")
 def hash_file(file, algo, compare):
-    """Calculer le hash d'un fichier en utilisant un algorithme choisi."""
+    """Calculate and/or campare hashes."""
     algo = algo or 'sha256'  # sha256 par défaut
     h = hashlib.new(algo)
 
@@ -264,7 +264,7 @@ def hash_file(file, algo, compare):
 # === STCFOLD ===
 @cli.command("stcfold")
 def stcfold():
-    """Lister tous les fichiers du répertoire"""
+    """List all files of a directory in a tree structure."""
     current_dir = os.getcwd()
        
     def walk(path, level=0):
@@ -330,7 +330,7 @@ def split_file(file, size):
 @click.option("--output", default=None, help="Nom du fichier de sortie (facultatif).")
 @click.option("--skip", default=False, is_flag=True, help="Ignorer la vérification du hash.")
 def assembly(output,skip):
-    """Assemble les segments compressés LZMA et vérifie leur intégrité avec un SHA256"""
+    """Assembles LZMA compressed segments and verifies integrity/."""
 
     folder = os.getcwd()
     
@@ -393,7 +393,7 @@ def assembly(output,skip):
 @click.argument("data2", type=str)
 
 def xyz(data1, data2):
-    """Calculer la distance entre deux points 3D."""
+    """Calculate the distance between two 3D points."""
     import math
     import re
 
@@ -424,7 +424,7 @@ def xyz(data1, data2):
 @click.option("--last", is_flag=True, help="Conserver le dernier caractère.")
 
 def emjspam(char, range, separator, last):
-    """Répéter une chaîne de caractères."""
+    """Repeat a string."""
     result = (char + separator) * range
     if not last:
         result = result.rstrip(separator) 
@@ -435,7 +435,7 @@ def emjspam(char, range, separator, last):
 @cli.command("version")
 @click.option("--debug", is_flag=True, help="Afficher les messages d'erreur détaillés.")
 def version(debug):
-    """Afficher la version de MCT."""
+    """Shows MCT Version."""
     version_file = Path(__file__).parent / "version"
     version_str = None
 
@@ -464,8 +464,7 @@ import subprocess
 @click.option("--recursive", is_flag=True, help="Parcourir les sous-dossiers")
 def flac2mp3(source, bitrate, recursive):
     """
-    Convertir un FLAC en MP3 en conservant tags et pochette.
-    Sans SOURCE, convertit tous les FLAC du dossier courant.
+    Convert a FLAC into a MP3 using FFmpeg.
     """
     current_dir = Path.cwd()
     
