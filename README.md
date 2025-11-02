@@ -13,6 +13,8 @@ Follow this instructions :
 
 ### Please note that to run flac2mp3, you will need to add FFmpeg to the Windows path
 
+Download link : [https://ffmpeg.org/](https://ffmpeg.org/)
+
 ## Commands list and usage
 
 * Try ```command --help``` in your terminal to understand the command syntaxe and usage.
