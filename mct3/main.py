@@ -2,7 +2,6 @@ import click
 import os
 import hashlib
 import lzma
-
 import requests
 import time
 from pathlib import Path
@@ -12,7 +11,6 @@ def cli():
     """MCT3 Utilitary Tool for cmd and powershell."""
     pass
 
-from mutagen.easyid3 import EasyID3
 from mutagen.id3 import ID3, APIC, USLT, ID3NoHeaderError
 from mutagen.flac import FLAC, Picture
 
@@ -385,7 +383,7 @@ def stcfold(depth, folders_only):
 # === SPLIT AND ASSEMBLY ===
 @cli.command("split")
 @click.argument("file", type=click.Path(exists=True))
-@click.option("--size", default=10, show_default=True, help="Taille max d’un segment en Mo.")
+@click.option("--size", default=10, show_default=True, help="Taille max d'un segment en Mo.")
 def split_file(file, size):
     """Split a file in 10MO segments using LZMA"""
     #show the original hash
@@ -527,7 +525,41 @@ def emjspam(char, range, separator, last):
     
     click.echo(click.style(result, fg="green"))
 
+# === LIST PORTS ===
+import psutil
+import socket
 
+@cli.command("checkports")
+@click.argument("process_name")
+def list_ports(process_name):
+    """
+    List all ports used by a given process name.
+    """
+    found = False
+    for proc in psutil.process_iter(["name", "pid"]):
+        try:
+            if proc.info["name"] and process_name.lower() in proc.info["name"].lower():
+                found = True
+                # Process name in cyan
+                click.echo(click.style(f"Process: {proc.info['name']} (PID {proc.info['pid']})", fg="cyan"))
+                connections = proc.net_connections(kind="inet")  # TCP/UDP connections
+                if not connections:
+                    # No connections in yellow
+                    click.echo(click.style("  No active connections.", fg="yellow"))
+                for conn in connections:
+                    proto = "TCP" if conn.type == socket.SOCK_STREAM else "UDP"
+                    laddr = f"{conn.laddr.ip}:{conn.laddr.port}" if conn.laddr else "-"
+                    raddr = f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else "-"
+                    # Ports found in green
+                    click.echo(click.style(f"  {proto} → Local: {laddr}, Remote: {raddr}, Status: {conn.status}", fg="green"))
+                click.echo("-" * 40)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    if not found:
+        click.echo(click.style(f"No process matching '{process_name}' found.", fg="yellow"))
+
+#=== VERSION ===
 @cli.command("version")
 @click.option("--debug", is_flag=True, help="Afficher les messages d'erreur détaillés.")
 def version(debug):

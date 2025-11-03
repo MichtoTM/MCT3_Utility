@@ -1,8 +1,8 @@
-from setuptools import setup, find_packages
+from setuptools import setup, find_packages # pyright: ignore[reportMissingModuleSource]
 
 setup(
     name="mct3",
-    version="2.0.3",
+    version="2.5.4",
     author="MichtOo",
     description="CLI tool for audio and file utilities.",
     packages=find_packages(),
@@ -11,6 +11,7 @@ setup(
         "click>=8.3",
         "mutagen>=1.47.0",
         "requests>=2.32.5",
+        "psutil>=7.1.3"
     ],
     entry_points={
         "console_scripts": [
