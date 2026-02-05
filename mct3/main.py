@@ -10,76 +10,79 @@ from pathlib import Path
 def cli():
     """MCT3 Utilitary Tool for cmd and powershell."""
     pass
-
-from mutagen.id3 import ID3, APIC, USLT, ID3NoHeaderError
-from mutagen.flac import FLAC, Picture
-
 # === METADATA ===
 @cli.group()
 def metadata():
-    """Read MP3 or FLAC metadata."""
+    """Read audio metadata."""
     pass
 
+from mutagen import File
+from mutagen.id3 import ID3, USLT, APIC
 
 @metadata.command("read")
 @click.argument("audio_file")
 def read_metadata(audio_file):
-    """Display metadata information from an audio file."""
+    """Display all metadata from an audio file."""
     if not os.path.isfile(audio_file):
         click.echo(click.style("File not found.", fg="red"))
         return
 
-    ext = os.path.splitext(audio_file)[1].lower()
-
     try:
-        if ext == ".mp3":
-            audio = ID3(audio_file)
-        elif ext == ".flac":
-            audio = FLAC(audio_file)
-        else:
-            click.echo(click.style("Unsupported format. Only MP3 and FLAC are supported.", fg="red"))
+        audio = File(audio_file)
+        if audio is None:
+            click.echo(click.style("Unsupported or invalid audio file.", fg="red"))
             return
     except Exception as e:
         click.echo(click.style(f"Error reading file: {e}", fg="red"))
         return
 
-    click.echo(click.style(f"\nMetadata for {os.path.basename(audio_file)}:\n", bold=True))
+    click.echo(click.style(
+        f"\nMetadata for {os.path.basename(audio_file)}:\n",
+        bold=True
+    ))
 
-    # General tags
-    if ext == ".mp3":
-        for tag in ["TIT2", "TPE1", "TALB", "TDRC", "TCON", "TRCK"]:
-            if tag in audio:
-                click.echo(f"{tag}: {audio[tag].text[0]}")
-        comments = [frame.text for frame in audio.getall("COMM")]
-        if comments:
-            click.echo(f"Comments: {' | '.join(comments)}")
-    elif ext == ".flac":
+    # === TAGS ===
+    if audio.tags:
         for key, value in audio.tags.items():
-            click.echo(f"{key}: {', '.join(value)}")
+            if isinstance(value, list):
+                value = ", ".join(str(v) for v in value)
+            else:
+                value = str(value)
+            click.echo(f"{key}: {value}")
+    else:
+        click.echo(click.style("No metadata found.", fg="yellow"))
 
-    # Lyrics
-    if ext == ".mp3":
-        lyrics = [frame.text for frame in audio.getall("USLT")]
-        if lyrics:
-            click.echo("\nLyrics:\n" + lyrics[0])
-        else:
-            click.echo(click.style("No lyrics found.", fg="yellow"))
-    elif ext == ".flac":
-        if "lyrics" in audio.tags:
-            click.echo("\nLyrics:\n" + audio.tags["lyrics"][0])
-        else:
-            click.echo(click.style("No lyrics found.", fg="yellow"))
+    # === LYRICS ===
+    lyrics_found = False
 
-    # Cover image
+    # ID3 (MP3)
+    if isinstance(audio.tags, ID3):
+        for frame in audio.tags.getall("USLT"):
+            click.echo("\nLyrics:\n" + frame.text)
+            lyrics_found = True
+
+    # Vorbis / FLAC / others
+    elif audio.tags and "lyrics" in audio.tags:
+        click.echo("\nLyrics:\n" + audio.tags["lyrics"][0])
+        lyrics_found = True
+
+    if not lyrics_found:
+        click.echo(click.style("\nNo lyrics found.", fg="yellow"))
+
+    # === COVER ART ===
     has_cover = False
-    if ext == ".mp3":
-        if audio.getall("APIC"):
-            has_cover = True
-    elif ext == ".flac":
-        if audio.pictures:
-            has_cover = True
 
-    click.echo(f"\nCover art: {'found' if has_cover else 'not found'}")
+    # MP3
+    if isinstance(audio.tags, ID3):
+        has_cover = bool(audio.tags.getall("APIC"))
+
+    # FLAC / others
+    elif hasattr(audio, "pictures") and audio.pictures:
+        has_cover = True
+
+    click.echo(
+        f"\nCover art: {'found' if has_cover else 'not found'}"
+    )
 
 
 # === COVER ===
@@ -612,19 +615,43 @@ def flac2mp3(source, bitrate, recursive):
         mp3_path = flac_path.with_suffix(".mp3")
 
         # Construction de la commande FFmpeg
+        # cmd = [
+        #     "ffmpeg",
+        #     "-y",                      # écrase sans demander
+        #     "-i", str(flac_path),      # fichier source
+        #     "-map", "0:a",             # map audio
+        #     "-c:a", "libmp3lame",      # encodeur MP3
+        #     "-b:a", bitrate,           # bitrate
+        #     "-map", "0:v?",            # map video (pochette) si existante
+        #     "-c:v", "copy",            # copie le flux image tel quel
+        #     "-id3v2_version", "3",     # ID3v2.3
+        #     "-write_id3v1", "1",       # écrit ID3v1
+        #     str(mp3_path)
+        # ]
         cmd = [
-            "ffmpeg",
-            "-y",                      # écrase sans demander
-            "-i", str(flac_path),      # fichier source
-            "-map", "0:a",             # map audio
-            "-c:a", "libmp3lame",      # encodeur MP3
-            "-b:a", bitrate,           # bitrate
-            "-map", "0:v?",            # map video (pochette) si existante
-            "-c:v", "copy",            # copie le flux image tel quel
-            "-id3v2_version", "3",     # ID3v2.3
-            "-write_id3v1", "1",       # écrit ID3v1
-            str(mp3_path)
-        ]
+                "ffmpeg",
+                "-y",
+                "-i", str(flac_path),
+
+                # Audio
+                "-map", "0:a",
+                "-c:a", "libmp3lame",
+                "-b:a", bitrate,
+
+                # Cover art
+                "-map", "0:v?",
+                "-c:v", "copy",
+
+                # Metadata
+                "-map_metadata", "0",
+                "-map_chapters", "0",
+
+                # ID3 settings
+                "-id3v2_version", "3",
+                "-write_id3v1", "1",
+
+                str(mp3_path)
+            ]
 
         # Exécution de FFmpeg
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -636,6 +663,41 @@ def flac2mp3(source, bitrate, recursive):
 
     click.echo(click.style("Conversion terminée.", fg="cyan"))
 
+# ==== PASSWORDGEN ===
+import random
+@cli.command("passgen")
+@click.option("--length", default=12, help="Password length")
+@click.option("--no-special", is_flag=True, help="Exclude special characters")
+@click.option("--no-numbers", is_flag=True, help="Exclude numbers")
+@click.option("--no-uppercase", is_flag=True, help="Exclude uppercase letters")
+@click.option("--no-lowercase", is_flag=True, help="Exclude lowercase letters")
+def passgen(length, no_special, no_numbers, no_uppercase, no_lowercase):
+    min = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
+    maj = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']
+    numbers = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+    specials = ['/', '*', '-', '+', '.', '-', '_', '@', 'é', "è", '&', '!', ':', '%', '$', '?']
+
+    password = []
+    character = None
+    for i in range (length):
+        rand=random.randint(1,4)
+        if rand == 1 and not no_lowercase:
+            character=random.choice(min)
+        if rand == 2 and not no_uppercase:
+            character=random.choice(maj)
+        if rand == 3 and not no_numbers:
+            character=random.choice(numbers)
+        if rand == 4 and not no_special:
+            character=random.choice(specials)
+        
+        if not character :
+            i+= 1
+            click.echo(click.style("retrying...", fg="yellow"))
+        else :
+            password.append(character)
+
+    click.echo("".join(password))
+        
 # === LANCEMENT ===
 if __name__ == "__main__":
     cli()

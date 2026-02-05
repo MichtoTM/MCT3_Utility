@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
 commandcurl.py
+tor_country.json
+testv2.py
 v0.5.py
 mct3.egg-info/
 *.log
