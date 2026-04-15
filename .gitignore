@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+tokens.json
 commandcurl.py
 tor_country.json
 testv2.py

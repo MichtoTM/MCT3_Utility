@@ -1,255 +1,225 @@
 import click
 import os
-import hashlib
+import mimetypes
+import base64
 import lzma
+import hashlib
 import requests
 import time
+import math
+import re
+import psutil
+import socket
+import random
+import string
+import subprocess
 from pathlib import Path
+from mutagen import File
+from mutagen.id3 import ID3, USLT, APIC
+from mutagen.flac import Picture
+
+# === FONCTIONS UTILITAIRES (AUDIO) ===
+
+def get_audio(filepath):
+    """Charge le fichier audio avec Mutagen et initialise les tags si absents."""
+    if not os.path.isfile(filepath):
+        click.echo(click.style(f"Fichier introuvable : {filepath}", fg="red"))
+        return None
+    try:
+        audio = File(filepath)
+        if audio is None:
+            click.echo(click.style("Format audio non supporté ou invalide.", fg="red"))
+            return None
+        if getattr(audio, "tags", None) is None:
+            audio.add_tags()
+        return audio
+    except Exception as e:
+        click.echo(click.style(f"Erreur lors de la lecture : {e}", fg="red"))
+        return None
+
+def save_audio(audio, filepath, success_msg):
+    """Sauvegarde le fichier audio et affiche un message de succès."""
+    try:
+        audio.save()
+        click.echo(click.style(success_msg, fg="green"))
+    except Exception as e:
+        click.echo(click.style(f"Erreur lors de la sauvegarde : {e}", fg="red"))
+
+# === CLI PRINCIPALE ===
 
 @click.group()
 def cli():
-    """MCT3 Utilitary Tool for cmd and powershell."""
-    pass
-# === METADATA ===
-@cli.group()
-def metadata():
-    """Read audio metadata."""
+    """Outil utilitaire MCT3 pour cmd et powershell."""
     pass
 
-from mutagen import File
-from mutagen.id3 import ID3, USLT, APIC
+# === METADATA ===
+
+@cli.group()
+def metadata():
+    """Lire les métadonnées audio."""
+    pass
 
 @metadata.command("read")
 @click.argument("audio_file")
 def read_metadata(audio_file):
-    """Display all metadata from an audio file."""
-    if not os.path.isfile(audio_file):
-        click.echo(click.style("File not found.", fg="red"))
-        return
+    """Affiche toutes les métadonnées d'un fichier audio sans doublons."""
+    audio = get_audio(audio_file)
+    if not audio: return
 
-    try:
-        audio = File(audio_file)
-        if audio is None:
-            click.echo(click.style("Unsupported or invalid audio file.", fg="red"))
-            return
-    except Exception as e:
-        click.echo(click.style(f"Error reading file: {e}", fg="red"))
-        return
+    click.echo(click.style(f"\n=== Métadonnées pour {os.path.basename(audio_file)} ===\n", bold=True))
 
-    click.echo(click.style(
-        f"\nMetadata for {os.path.basename(audio_file)}:\n",
-        bold=True
-    ))
+    # Liste des clés de paroles à exclure de l'affichage général pour éviter les doublons
+    lyrics_keys = ["lyrics", "LYRICS", "USLT"]
 
-    # === TAGS ===
+    # Tags généraux
     if audio.tags:
         for key, value in audio.tags.items():
-            if isinstance(value, list):
-                value = ", ".join(str(v) for v in value)
-            else:
-                value = str(value)
-            click.echo(f"{key}: {value}")
+            # On ignore les images brutes et les paroles dans cette boucle
+            if (key != "metadata_block_picture" and 
+                not isinstance(value, APIC) and 
+                key.upper() not in [k.upper() for k in lyrics_keys]):
+                
+                val_str = ", ".join(map(str, value)) if isinstance(value, list) else str(value)
+                click.echo(f"{key}: {val_str}")
     else:
-        click.echo(click.style("No metadata found.", fg="yellow"))
+        click.echo(click.style("Aucune métadonnée trouvée.", fg="yellow"))
 
-    # === LYRICS ===
+    # Section Paroles dédiée
+    click.echo(click.style("\n[Paroles]", bold=True))
     lyrics_found = False
-
-    # ID3 (MP3)
+    
     if isinstance(audio.tags, ID3):
         for frame in audio.tags.getall("USLT"):
-            click.echo("\nLyrics:\n" + frame.text)
+            click.echo(frame.text)
+            lyrics_found = True
+    else:
+        # Pour FLAC/OGG, on cherche 'lyrics' ou 'LYRICS'
+        lyrics = audio.tags.get("lyrics") or audio.tags.get("LYRICS")
+        if lyrics:
+            click.echo(lyrics[0] if isinstance(lyrics, list) else lyrics)
             lyrics_found = True
 
-    # Vorbis / FLAC / others
-    elif audio.tags and "lyrics" in audio.tags:
-        click.echo("\nLyrics:\n" + audio.tags["lyrics"][0])
-        lyrics_found = True
-
     if not lyrics_found:
-        click.echo(click.style("\nNo lyrics found.", fg="yellow"))
+        click.echo(click.style("Aucune parole trouvée.", fg="yellow"))
 
-    # === COVER ART ===
+    # Pochette (Cover)
     has_cover = False
-
-    # MP3
     if isinstance(audio.tags, ID3):
         has_cover = bool(audio.tags.getall("APIC"))
-
-    # FLAC / others
     elif hasattr(audio, "pictures") and audio.pictures:
         has_cover = True
+    elif "metadata_block_picture" in audio.tags:
+        has_cover = True
 
-    click.echo(
-        f"\nCover art: {'found' if has_cover else 'not found'}"
-    )
-
+    click.echo(f"\nPochette : {'Trouvée' if has_cover else 'Non trouvée'}")
 
 # === COVER ===
+
 @cli.group()
 def cover():
-    """Add or remove cover art from a music file."""
+    """Ajouter ou supprimer la pochette d'un fichier audio."""
     pass
-
 
 @cover.command("add")
 @click.argument("audio_file")
-@click.option("--image", required=True, help="Path to the image (.jpg or .png).")
+@click.option("--image", required=True, help="Chemin vers l'image (.jpg ou .png).")
 def add_cover(audio_file, image):
-    """Attach a cover image to an MP3 or FLAC file."""
-    if not os.path.isfile(audio_file) or not os.path.isfile(image):
-        click.echo(click.style("Audio or image file not found.", fg="red"))
+    """Ajoute une image de pochette à un fichier audio."""
+    audio = get_audio(audio_file)
+    if not audio: return
+
+    if not os.path.isfile(image):
+        click.echo(click.style("Fichier image introuvable.", fg="red"))
         return
 
-    ext = os.path.splitext(audio_file)[1].lower()
-    img_ext = os.path.splitext(image)[1].lower()
-
-    mime = (
-        "image/jpeg" if img_ext in [".jpg", ".jpeg"]
-        else "image/png" if img_ext == ".png"
-        else None
-    )
-    if not mime:
-        click.echo(click.style("Unsupported image format.", fg="red"))
+    mime_type, _ = mimetypes.guess_type(image)
+    if not mime_type or not mime_type.startswith('image/'):
+        click.echo(click.style("Format d'image non supporté.", fg="red"))
         return
 
-    try:
-        if ext == ".mp3":
-            try:
-                audio = ID3(audio_file)
-            except ID3NoHeaderError:
-                audio = ID3()
-            with open(image, "rb") as img_data:
-                audio.add(APIC(encoding=3, mime=mime, type=3, desc="Cover", data=img_data.read()))
-            audio.save(audio_file)
-        elif ext == ".flac":
-            audio = FLAC(audio_file)
-            pic = Picture()
-            pic.type = 3
-            pic.mime = mime
-            with open(image, "rb") as img_data:
-                pic.data = img_data.read()
-            audio.add_picture(pic)
-            audio.save()
-        else:
-            click.echo(click.style("Unsupported format. Only MP3 and FLAC are supported.", fg="red"))
-            return
+    with open(image, "rb") as img_file:
+        img_data = img_file.read()
 
-        click.echo(click.style("Cover art added successfully.", fg="green"))
-    except Exception as e:
-        click.echo(click.style(f"Error adding cover: {e}", fg="red"))
+    if isinstance(audio.tags, ID3):
+        audio.tags.add(APIC(encoding=3, mime=mime_type, type=3, desc="Cover", data=img_data))
+    elif hasattr(audio, "add_picture"): 
+        pic = Picture()
+        pic.type, pic.mime, pic.data = 3, mime_type, img_data
+        audio.add_picture(pic)
+    else:
+        pic = Picture()
+        pic.type, pic.mime, pic.data = 3, mime_type, img_data
+        b64_pict = base64.b64encode(pic.write()).decode("ascii")
+        audio.tags["metadata_block_picture"] = [b64_pict]
 
+    save_audio(audio, audio_file, "Pochette ajoutée avec succès.")
 
 @cover.command("remove")
 @click.argument("audio_file")
 def remove_cover(audio_file):
-    """Remove cover art from an MP3 or FLAC file."""
-    if not os.path.isfile(audio_file):
-        click.echo(click.style("File not found.", fg="red"))
-        return
+    """Supprime la pochette d'un fichier audio."""
+    audio = get_audio(audio_file)
+    if not audio: return
 
-    ext = os.path.splitext(audio_file)[1].lower()
+    if isinstance(audio.tags, ID3):
+        audio.tags.delall("APIC")
+    elif hasattr(audio, "clear_pictures"):
+        audio.clear_pictures()
+    else: 
+        audio.tags.pop("metadata_block_picture", None)
 
-    try:
-        if ext == ".mp3":
-            audio = ID3(audio_file)
-            audio.delall("APIC")
-            audio.save()
-        elif ext == ".flac":
-            audio = FLAC(audio_file)
-            audio.clear_pictures()
-            audio.save()
-        else:
-            click.echo(click.style("Unsupported format. Only MP3 and FLAC are supported.", fg="red"))
-            return
-
-        click.echo(click.style("Cover art removed successfully.", fg="green"))
-    except Exception as e:
-        click.echo(click.style(f"Error removing cover: {e}", fg="red"))
-
+    save_audio(audio, audio_file, "Pochette supprimée avec succès.")
 
 # === LYRICS ===
+
 @cli.group()
 def lyrics():
-    """Add or remove lyrics from MP3 or FLAC files."""
+    """Ajouter ou supprimer les paroles."""
     pass
-
 
 @lyrics.command("add")
 @click.argument("audio_file")
-@click.option("--lyrics", required=True, help="Path to a .txt or .lrc file containing lyrics.")
-def add_lyrics(audio_file, lyrics):
-    """Attach lyrics text to an audio file."""
-    if not os.path.isfile(audio_file) or not os.path.isfile(lyrics):
-        click.echo(click.style("Audio or lyrics file not found.", fg="red"))
-        return
+@click.option("--lyrics", "lyrics_file", required=True, help="Chemin vers le fichier contenant les paroles (.txt ou .lrc).")
+def add_lyrics(audio_file, lyrics_file):
+    """Associe des paroles textuelles à un fichier audio."""
+    audio = get_audio(audio_file)
+    if not audio: return
 
     try:
-        with open(lyrics, "r", encoding="utf-8") as f:
+        with open(lyrics_file, "r", encoding="utf-8") as f:
             lyrics_text = f.read()
     except Exception as e:
-        click.echo(click.style(f"Error reading lyrics: {e}", fg="red"))
+        click.echo(click.style(f"Erreur de lecture du fichier texte : {e}", fg="red"))
         return
 
-    ext = os.path.splitext(audio_file)[1].lower()
-
-    try:
-        if ext == ".mp3":
-            try:
-                audio = ID3(audio_file)
-            except ID3NoHeaderError:
-                audio = ID3()
-            audio.add(USLT(encoding=3, lang="eng", desc="Lyrics", text=lyrics_text))
-            audio.save(audio_file)
-        elif ext == ".flac":
-            audio = FLAC(audio_file)
-            audio["lyrics"] = lyrics_text
-            audio.save()
-        else:
-            click.echo(click.style("Unsupported format. Only MP3 and FLAC are supported.", fg="red"))
-            return
-
-        click.echo(click.style("Lyrics added successfully.", fg="green"))
-    except Exception as e:
-        click.echo(click.style(f"Error adding lyrics: {e}", fg="red"))
-
+    if isinstance(audio.tags, ID3):
+        audio.tags.add(USLT(encoding=3, lang="eng", desc="Lyrics", text=lyrics_text))
+    else:
+        audio.tags["lyrics"] = [lyrics_text]
+    
+    save_audio(audio, audio_file, "Paroles ajoutées avec succès.")
 
 @lyrics.command("remove")
 @click.argument("audio_file")
 def remove_lyrics(audio_file):
-    """Remove lyrics from an MP3 or FLAC file."""
-    if not os.path.isfile(audio_file):
-        click.echo(click.style("File not found.", fg="red"))
-        return
+    """Supprime les paroles d'un fichier audio."""
+    audio = get_audio(audio_file)
+    if not audio: return
 
-    ext = os.path.splitext(audio_file)[1].lower()
+    if isinstance(audio.tags, ID3):
+        audio.tags.delall("USLT")
+    else:
+        audio.tags.pop("lyrics", None)
+        audio.tags.pop("LYRICS", None)
 
-    try:
-        if ext == ".mp3":
-            audio = ID3(audio_file)
-            audio.delall("USLT")
-            audio.save()
-        elif ext == ".flac":
-            audio = FLAC(audio_file)
-            if "lyrics" in audio:
-                del audio["lyrics"]
-            audio.save()
-        else:
-            click.echo(click.style("Unsupported format. Only MP3 and FLAC are supported.", fg="red"))
-            return
-
-        click.echo(click.style("Lyrics removed successfully.", fg="green"))
-    except Exception as e:
-        click.echo(click.style(f"Error removing lyrics: {e}", fg="red"))
+    save_audio(audio, audio_file, "Paroles supprimées avec succès.")
 
 # === VTSCAN ===
 
 @cli.command("vtscan")
 @click.argument("file", type=click.Path(exists=True))
-
-
 def virus_total_scan(file):
-    """Analyse a file with VirusTotal API."""    
+    """Analyse un fichier avec l'API VirusTotal."""    
     try:
         token_path = Path(__file__).parent / "token.txt"
         with open(token_path, "r", encoding="utf-8") as token_file:
@@ -260,15 +230,8 @@ def virus_total_scan(file):
         click.echo(click.style(f"Erreur : impossible de lire la clé API → {e}", fg="red"))
         return
 
-    HEADERS = {
-        "x-apikey": API_KEY
-    }
-
+    HEADERS = {"x-apikey": API_KEY}
     filepath = Path(file)
-
-    if not filepath.exists():
-        click.echo(click.style("Fichier introuvable.", fg="red"))
-        return
 
     try:
         with open(filepath, "rb") as f:
@@ -299,7 +262,6 @@ def virus_total_scan(file):
             total = sum(stats.values())
             click.echo(click.style(f"\nAnalyse terminée : {malicious} détection(s) malveillante(s) sur {total} moteurs.", fg="green"))
 
-            # Facultatif : afficher les moteurs ayant détecté quelque chose
             results = analysis_data["data"]["attributes"].get("results", {})
             for engine, result in results.items():
                 if result.get("category") == "malicious":
@@ -313,14 +275,13 @@ def virus_total_scan(file):
 # === HASH ===
 @cli.command("hash")
 @click.argument("file", type=click.Path(exists=True))
-@click.option('--sha1', 'algo', flag_value='sha1', help="Utiliser SHA1")
-@click.option('--sha256', 'algo', flag_value='sha256', help="Utiliser SHA256 (défaut)")
-@click.option('--sha512', 'algo', flag_value='sha512', help="Utiliser SHA512")
-@click.option('--md5', 'algo', flag_value='md5', help="Utiliser MD5")
-@click.option('--compare', type=str, help="Comparer avec un hash existant")
+@click.option('--sha1', 'algo', flag_value='sha1', help="Utiliser l'algorithme SHA1.")
+@click.option('--sha256', 'algo', flag_value='sha256', default=True, help="Utiliser l'algorithme SHA256 (par défaut).")
+@click.option('--sha512', 'algo', flag_value='sha512', help="Utiliser l'algorithme SHA512.")
+@click.option('--md5', 'algo', flag_value='md5', help="Utiliser l'algorithme MD5.")
+@click.option('--compare', type=str, help="Comparer avec un hachage existant.")
 def hash_file(file, algo, compare):
-    """Calculate and/or campare hashes."""
-    algo = algo or 'sha256'  # sha256 par défaut
+    """Calcule et/ou compare les hachages d'un fichier."""
     h = hashlib.new(algo)
 
     with open(file, 'rb') as f:
@@ -329,24 +290,25 @@ def hash_file(file, algo, compare):
             h.update(chunk)
             chunk = f.read(8192)
     
-       
-    if h.hexdigest() == compare:
-        click.echo(click.style(f"{algo.upper()} : {h.hexdigest()}", fg="green"))
-        click.echo(click.style(f"Hash similaires.", fg="green", bold=True))
-    elif compare is not None:
-        click.echo(click.style(f"Hash différents :", fg="red", bold=True))
-        click.echo(click.style(f"Attendu : {compare}", fg="yellow"))
-        click.echo(click.style(f"Obtenu  : {h.hexdigest()}", fg="yellow"))
+    result_hash = h.hexdigest()
+    
+    if compare:
+        if result_hash.lower() == compare.lower():
+            click.echo(click.style(f"{algo.upper()} : {result_hash}", fg="green"))
+            click.echo(click.style("Les hachages sont identiques.", fg="green", bold=True))
+        else:
+            click.echo(click.style("Les hachages sont différents :", fg="red", bold=True))
+            click.echo(click.style(f"Attendu : {compare}", fg="yellow"))
+            click.echo(click.style(f"Obtenu  : {result_hash}", fg="yellow"))
     else:
-        click.echo(click.style(f"{algo.upper()} : {h.hexdigest()}", fg="green"))
-
+        click.echo(click.style(f"{algo.upper()} : {result_hash}", fg="green"))
 
 # === STCFOLD ===
 @cli.command("stcfold")
-@click.option("--depth", default=None, type=int, help="Maximum depth to display (e.g., 2).")
-@click.option("--folders-only", is_flag=True, help="Show only folders (hide files).")
+@click.option("--depth", default=None, type=int, help="Profondeur maximale à afficher (ex: 2).")
+@click.option("--folders-only", is_flag=True, help="Afficher uniquement les dossiers (masquer les fichiers).")
 def stcfold(depth, folders_only):
-    """Display directory contents as a tree structure."""
+    """Affiche le contenu du répertoire sous forme d'arborescence."""
     current_dir = os.getcwd()
     base_name = os.path.basename(current_dir)
 
@@ -357,7 +319,7 @@ def stcfold(depth, folders_only):
         try:
             entries = sorted(os.listdir(path))
         except PermissionError:
-            click.echo(f"{prefix}└── [Access denied]")
+            click.echo(f"{prefix}└── [Accès refusé]")
             return
 
         entries_count = len(entries)
@@ -372,48 +334,43 @@ def stcfold(depth, folders_only):
             elif not folders_only:
                 click.echo(f"{prefix}{connector}{click.style(entry, fg='green')}")
 
-    # Header
     click.echo(click.style(f"📁 {base_name}/", fg="white", bold=True))
     click.echo("│")
-
-    # Walk directory
     walk(current_dir)
-
-    # Footer
+    
     click.echo()
-    click.echo(click.style(f"Command executed successfully in \"{current_dir}\".", fg="green", bold=True))
+    click.echo(click.style(f"Commande exécutée avec succès dans \"{current_dir}\".", fg="green", bold=True))
 
-# === SPLIT AND ASSEMBLY ===
+# === SPLIT AND ASSEMBLY (LZMA2) ===
 @cli.command("split")
 @click.argument("file", type=click.Path(exists=True))
-@click.option("--size", default=10, show_default=True, help="Taille max d'un segment en Mo.")
+@click.option("--size", default=10, show_default=True, help="Taille maximale d'un segment en Mo.")
 def split_file(file, size):
-    """Split a file in 10MO segments using LZMA"""
-    #show the original hash
-    algo = 'sha256'  # sha256 par défaut
-    h = hashlib.new(algo)
+    """Découpe un fichier en segments de 10 Mo compressés avec LZMA2."""
+    h = hashlib.sha256()
 
     with open(file, 'rb') as f:
-        chunk = f.read(8192)
-        while chunk:
+        while chunk := f.read(8192):
             h.update(chunk)
-            chunk = f.read(8192)
 
-    click.echo(click.style(f"{algo.upper()} : {h.hexdigest()}", fg="green"))
+    original_hash = h.hexdigest()
+    click.echo(click.style(f"SHA256 original : {original_hash}", fg="green"))
     
-    #split the file
-    CHUNK_SIZE = size * 1024 * 1024  # 10 MB
+    CHUNK_SIZE = size * 1024 * 1024
     base_name = os.path.basename(file)
     output_dir = f"{base_name}_splits"
     os.makedirs(output_dir, exist_ok=True)
-    #save hah.txt ion the new folder
+    
     with open(os.path.join(output_dir, "hash.txt"), "w") as f:
-        f.write(h.hexdigest())
+        f.write(original_hash)
+
+    # Configuration explicite pour LZMA2
+    lzma_filters = [{"id": lzma.FILTER_LZMA2, "preset": 9}]
 
     with open(file, "rb") as f:
         index = 0
         while chunk := f.read(CHUNK_SIZE):
-            compressed_chunk = lzma.compress(chunk)
+            compressed_chunk = lzma.compress(chunk, format=lzma.FORMAT_XZ, filters=lzma_filters)
             part_path = os.path.join(output_dir, f"{base_name}.part{index:03d}.xz")
             with open(part_path, "wb") as part:
                 part.write(compressed_chunk)
@@ -422,55 +379,48 @@ def split_file(file, size):
 
     click.echo(click.style("Découpage terminé.", fg="green"))
 
-
 @cli.command("assembly")
 @click.option("--output", default=None, help="Nom du fichier de sortie (facultatif).")
-@click.option("--skip", default=False, is_flag=True, help="Ignorer la vérification du hash.")
-def assembly(output,skip):
-    """Assembles LZMA compressed segments and verifies integrity/."""
-
+@click.option("--skip", default=False, is_flag=True, help="Ignorer la vérification du hachage.")
+def assembly(output, skip):
+    """Assemble des segments compressés LZMA2 et vérifie leur intégrité."""
     folder = os.getcwd()
     
     if skip:
-        click.echo(click.style("Vérification du hash ignorée.", fg="yellow"))
+        click.echo(click.style("Vérification du hachage ignorée.", fg="yellow"))
         expected_hash = None
-    
     elif not os.path.exists("hash.txt"):
-        expected_hash = click.prompt("SHA256 attendu du fichier original", type=str)
-
+        expected_hash = click.prompt("Hachage SHA256 attendu du fichier original", type=str)
     else:
         with open(os.path.join(folder, "hash.txt"), "r") as f:
-            expected_hash = f.read()
+            expected_hash = f.read().strip()
     
-    # Lister et trier les fichiers .xz
     part_files = sorted(
-        [f for f in os.listdir(folder) if f.endswith(".xz")],
+        [f for f in os.listdir(folder) if f.endswith(".xz") and ".part" in f],
         key=lambda x: int(x.split(".part")[1].split(".")[0])
     )
 
     if not part_files:
-        click.echo(click.style("Aucun segment .xz trouvé dans le dossier.", fg="red"))
+        click.echo(click.style("Aucun segment .xz trouvé dans le dossier actuel.", fg="red"))
         return
 
-    # Deviner le nom du fichier de base à partir du premier segment
     base_name = part_files[0].split(".part")[0]
     output_name = output if output else base_name
-    output_path = os.path.join(os.getcwd(), output_name)
+    output_path = os.path.join(folder, output_name)
 
     click.echo(f"Assemblage des segments vers : {output_path}")
+
+    # Configuration explicite de lecture LZMA2
+    lzma_filters = [{"id": lzma.FILTER_LZMA2}]
 
     with open(output_path, "wb") as out_f:
         for part in part_files:
             part_path = os.path.join(folder, part)
-            with lzma.open(part_path, "rb") as pf:
+            with lzma.open(part_path, "rb", format=lzma.FORMAT_XZ, filters=lzma_filters) as pf:
                 while chunk := pf.read(8192):
                     out_f.write(chunk)
 
-    if expected_hash is None:
-        return
-    
-    else:
-        # Calcul du hash SHA256
+    if expected_hash:
         h = hashlib.sha256()
         with open(output_path, 'rb') as f:
             while chunk := f.read(8192):
@@ -478,9 +428,9 @@ def assembly(output,skip):
         result_hash = h.hexdigest()
 
         if result_hash == expected_hash.lower():
-            click.echo(click.style("Fichier reconstruit avec succès. Intégrité vérifié.", fg="green", bold=True))
+            click.echo(click.style("Fichier reconstruit avec succès. Intégrité vérifiée.", fg="green", bold=True))
         else:
-            click.echo(click.style("Le hash ne correspond pas. Fichier corrompu ?", fg="red", bold=True))
+            click.echo(click.style("Le hachage ne correspond pas. Fichier potentiellement corrompu.", fg="red", bold=True))
             click.echo(f"Attendu : {expected_hash.lower()}")
             click.echo(f"Obtenu  : {result_hash}")
 
@@ -488,24 +438,18 @@ def assembly(output,skip):
 @cli.command("xyz")
 @click.argument("data1", type=str)
 @click.argument("data2", type=str)
-
 def xyz(data1, data2):
-    """Calculate the distance between two 3D points."""
-    import math
-    import re
+    """Calcule la distance entre deux points 3D (format X,Y,Z ou X;Y;Z)."""
+    def get_distance(p1, p2):
+        p1 = re.split(r'[;,]', p1)
+        p2 = re.split(r'[;,]', p2)
 
-    def get_distance(data1, data2):
-        data1 = re.split(r'[;,]', data1)
-        data2 = re.split(r'[;,]', data2)
-
-        if len(data1) == 3 and len(data2) == 3:
-            x1, y1, z1 = float(data1[0]), float(data1[1]), float(data1[2])
-            x2, y2, z2 = float(data2[0]), float(data2[1]), float(data2[2])
-
-            distance = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2 + (z2 - z1) ** 2)
-            return distance
+        if len(p1) == 3 and len(p2) == 3:
+            x1, y1, z1 = float(p1[0]), float(p1[1]), float(p1[2])
+            x2, y2, z2 = float(p2[0]), float(p2[1]), float(p2[2])
+            return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2 + (z2 - z1) ** 2)
         else:
-            raise ValueError("Les données doivent contenir trois coordonnées.")
+            raise ValueError("Les données doivent contenir exactement trois coordonnées.")
 
     try:
         distance = get_distance(data1, data2)
@@ -516,57 +460,47 @@ def xyz(data1, data2):
 # === SPAM ===
 @cli.command("emjspam")
 @click.argument("char", type=str)
-@click.argument("range", type=int)
+@click.argument("repeat_count", type=int)
 @click.option("--separator", default="", help="Séparateur entre les caractères.")
-@click.option("--last", is_flag=True, help="Conserver le dernier caractère.")
-
-def emjspam(char, range, separator, last):
-    """Repeat a string."""
-    result = (char + separator) * range
-    if not last:
+@click.option("--last", is_flag=True, help="Conserver le séparateur à la fin de la chaîne.")
+def emjspam(char, repeat_count, separator, last):
+    """Répète une chaîne de caractères ou un emoji N fois."""
+    result = (char + separator) * repeat_count
+    if not last and separator:
         result = result.rstrip(separator) 
-    
     click.echo(click.style(result, fg="green"))
 
 # === LIST PORTS ===
-import psutil
-import socket
-
 @cli.command("checkports")
 @click.argument("process_name")
 def list_ports(process_name):
-    """
-    List all ports used by a given process name.
-    """
+    """Liste tous les ports utilisés par un processus donné."""
     found = False
     for proc in psutil.process_iter(["name", "pid"]):
         try:
             if proc.info["name"] and process_name.lower() in proc.info["name"].lower():
                 found = True
-                # Process name in cyan
-                click.echo(click.style(f"Process: {proc.info['name']} (PID {proc.info['pid']})", fg="cyan"))
-                connections = proc.net_connections(kind="inet")  # TCP/UDP connections
+                click.echo(click.style(f"Processus : {proc.info['name']} (PID {proc.info['pid']})", fg="cyan"))
+                connections = proc.net_connections(kind="inet")
                 if not connections:
-                    # No connections in yellow
-                    click.echo(click.style("  No active connections.", fg="yellow"))
+                    click.echo(click.style("  Aucune connexion active.", fg="yellow"))
                 for conn in connections:
                     proto = "TCP" if conn.type == socket.SOCK_STREAM else "UDP"
                     laddr = f"{conn.laddr.ip}:{conn.laddr.port}" if conn.laddr else "-"
                     raddr = f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else "-"
-                    # Ports found in green
-                    click.echo(click.style(f"  {proto} → Local: {laddr}, Remote: {raddr}, Status: {conn.status}", fg="green"))
+                    click.echo(click.style(f"  {proto} → Local : {laddr}, Distant : {raddr}, Statut : {conn.status}", fg="green"))
                 click.echo("-" * 40)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
 
     if not found:
-        click.echo(click.style(f"No process matching '{process_name}' found.", fg="yellow"))
+        click.echo(click.style(f"Aucun processus correspondant à '{process_name}' n'a été trouvé.", fg="yellow"))
 
 #=== VERSION ===
 @cli.command("version")
 @click.option("--debug", is_flag=True, help="Afficher les messages d'erreur détaillés.")
 def version(debug):
-    """Shows MCT Version."""
+    """Affiche la version de MCT."""
     version_file = Path(__file__).parent / "version"
     version_str = None
 
@@ -578,7 +512,7 @@ def version(debug):
             click.echo(click.style(f"Erreur lors de la lecture de la version : {e}", fg="red"))
 
     if version_str:
-        click.echo(click.style(f"MCT Version: {version_str}", fg="blue"))
+        click.echo(click.style(f"Version MCT : {version_str}", fg="blue"))
     else:
         click.echo(click.style(
             "Version non trouvée. Package probablement modifié ou corrompu, réinstallation recommandée.",
@@ -586,20 +520,14 @@ def version(debug):
         ))
 
 # === FLAC TO MP3 ===
-from pathlib import Path
-import subprocess
-
 @cli.command("flac2mp3")
 @click.argument("source", required=False, type=click.Path(exists=True))
-@click.option("--bitrate", default="320k", show_default=True, help="Bitrate du MP3 final")
-@click.option("--recursive", is_flag=True, help="Parcourir les sous-dossiers")
+@click.option("--bitrate", default="320k", show_default=True, help="Bitrate du MP3 final.")
+@click.option("--recursive", is_flag=True, help="Parcourir également les sous-dossiers.")
 def flac2mp3(source, bitrate, recursive):
-    """
-    Convert a FLAC into a MP3 using FFmpeg.
-    """
+    """Convertit des fichiers FLAC en MP3 à l'aide de FFmpeg."""
     current_dir = Path.cwd()
     
-    # Déterminer les fichiers à convertir
     if source:
         flac_files = [Path(source)]
     else:
@@ -613,47 +541,15 @@ def flac2mp3(source, bitrate, recursive):
 
     for flac_path in flac_files:
         mp3_path = flac_path.with_suffix(".mp3")
-
-        # Construction de la commande FFmpeg
-        # cmd = [
-        #     "ffmpeg",
-        #     "-y",                      # écrase sans demander
-        #     "-i", str(flac_path),      # fichier source
-        #     "-map", "0:a",             # map audio
-        #     "-c:a", "libmp3lame",      # encodeur MP3
-        #     "-b:a", bitrate,           # bitrate
-        #     "-map", "0:v?",            # map video (pochette) si existante
-        #     "-c:v", "copy",            # copie le flux image tel quel
-        #     "-id3v2_version", "3",     # ID3v2.3
-        #     "-write_id3v1", "1",       # écrit ID3v1
-        #     str(mp3_path)
-        # ]
         cmd = [
-                "ffmpeg",
-                "-y",
-                "-i", str(flac_path),
+            "ffmpeg", "-y", "-i", str(flac_path),
+            "-map", "0:a", "-c:a", "libmp3lame", "-b:a", bitrate,
+            "-map", "0:v?", "-c:v", "copy",
+            "-map_metadata", "0", "-map_chapters", "0",
+            "-id3v2_version", "3", "-write_id3v1", "1",
+            str(mp3_path)
+        ]
 
-                # Audio
-                "-map", "0:a",
-                "-c:a", "libmp3lame",
-                "-b:a", bitrate,
-
-                # Cover art
-                "-map", "0:v?",
-                "-c:v", "copy",
-
-                # Metadata
-                "-map_metadata", "0",
-                "-map_chapters", "0",
-
-                # ID3 settings
-                "-id3v2_version", "3",
-                "-write_id3v1", "1",
-
-                str(mp3_path)
-            ]
-
-        # Exécution de FFmpeg
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             click.echo(click.style(f"Erreur lors de la conversion de {flac_path.name} :", fg="red"))
@@ -664,40 +560,34 @@ def flac2mp3(source, bitrate, recursive):
     click.echo(click.style("Conversion terminée.", fg="cyan"))
 
 # ==== PASSWORDGEN ===
-import random
 @cli.command("passgen")
-@click.option("--length", default=12, help="Password length")
-@click.option("--no-special", is_flag=True, help="Exclude special characters")
-@click.option("--no-numbers", is_flag=True, help="Exclude numbers")
-@click.option("--no-uppercase", is_flag=True, help="Exclude uppercase letters")
-@click.option("--no-lowercase", is_flag=True, help="Exclude lowercase letters")
-def passgen(length, no_special, no_numbers, no_uppercase, no_lowercase):
-    min = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
-    maj = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']
-    numbers = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
-    specials = ['/', '*', '-', '+', '.', '-', '_', '@', 'é', "è", '&', '!', ':', '%', '$', '?']
+@click.option("--length", default=12, help="Longueur du mot de passe.")
+@click.option("--no-specials", is_flag=True, help="Exclure les caractères spéciaux.")
+@click.option("--no-numbers", is_flag=True, help="Exclure les nombres.")
+@click.option("--no-uppercase", is_flag=True, help="Exclure les lettres majuscules.")
+@click.option("--no-lowercase", is_flag=True, help="Exclure les lettres minuscules.")
+def passgen(length, no_specials, no_numbers, no_uppercase, no_lowercase):
+    """Génère un mot de passe sécurisé et aléatoire."""
+    pool = ""
+    if not no_lowercase: pool += string.ascii_lowercase
+    if not no_uppercase: pool += string.ascii_uppercase
+    if not no_numbers: pool += string.digits
+    if not no_specials: pool += "/*-+._@éè&!:%$?é;,"
 
-    password = []
-    character = None
-    for i in range (length):
-        rand=random.randint(1,4)
-        if rand == 1 and not no_lowercase:
-            character=random.choice(min)
-        if rand == 2 and not no_uppercase:
-            character=random.choice(maj)
-        if rand == 3 and not no_numbers:
-            character=random.choice(numbers)
-        if rand == 4 and not no_special:
-            character=random.choice(specials)
-        
-        if not character :
-            i+= 1
-            click.echo(click.style("retrying...", fg="yellow"))
-        else :
-            password.append(character)
+    if not pool:
+        click.echo(click.style("Erreur : Tous les types de caractères ont été exclus.", fg="red"))
+        return
 
-    click.echo("".join(password))
-        
+    password = "".join(random.choices(pool, k=length))
+    click.echo(click.style(f"Mot de passe généré : {password}", fg="green", bold=True))
+
+# === MC SEED GENERATOR ==
+@cli.command("seedgen")
+def seedgen():
+    """Génère une seed aléatoire pour la génération de monde Minecraft."""
+    seed = random.randint(-2**63, 2**63-1)
+    click.echo(click.style(f"Seed Minecraft générée : {seed}", fg="green", bold=True))
+    
 # === LANCEMENT ===
 if __name__ == "__main__":
     cli()
