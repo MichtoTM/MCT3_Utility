@@ -6,10 +6,10 @@ A tool to add new commands in CMD like a ```.MP3``` or ```.FLAC``` metadata modi
 
 Follow this instructions :
 
-* Clone the GIT,
-* Extract it in a safe place,
-* Add ```token.txt``` in ```/mct3``` folder it must contain your VirusTotal api key,
-* Open a CMD and run ```pip install -e .``` or run ```install.cmd```.
+* Clone the GIT or extract the ZIP **in a safe place**,
+* Run ```install.cmd``` **or** open a CMD and run ```pip install -e .``` and ```pip install -r requirements.txt```.
+* Add ```token.txt``` (it must contain your VirusTotal api key) in ```/mct3``` folder if you want to use VirusTotal commands.
+
 
 ### Please note that to run flac2mp3, you will need to add FFmpeg to the Windows path
 
