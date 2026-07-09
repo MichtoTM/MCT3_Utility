@@ -9,7 +9,7 @@ Follow this instructions :
 * Clone the GIT,
 * Extract it in a safe place,
 * Add ```token.txt``` in ```/mct3``` folder it must contain your VirusTotal api key,
-* Open a CMD and run ```pip install -e .```
+* Open a CMD and run ```pip install -e .``` or run ```install.cmd```.
 
 ### Please note that to run flac2mp3, you will need to add FFmpeg to the Windows path
 

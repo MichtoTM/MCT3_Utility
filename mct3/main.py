@@ -64,7 +64,8 @@ def metadata():
 def read_metadata(audio_file):
     """Affiche toutes les métadonnées d'un fichier audio sans doublons."""
     audio = get_audio(audio_file)
-    if not audio: return
+    if not audio: 
+        return
 
     click.echo(click.style(f"\n=== Métadonnées pour {os.path.basename(audio_file)} ===\n", bold=True))
 
@@ -282,6 +283,8 @@ def virus_total_scan(file):
 @click.option('--compare', type=str, help="Comparer avec un hachage existant.")
 def hash_file(file, algo, compare):
     """Calcule et/ou compare les hachages d'un fichier."""
+    if algo is None:
+        algo = "sha256"
     h = hashlib.new(algo)
 
     with open(file, 'rb') as f:
@@ -457,6 +460,43 @@ def xyz(data1, data2):
     except ValueError as e:
         click.echo(click.style(f"Erreur : {e}", fg="red"))
 
+# ==== NETHER ====
+@cli.command("nether")
+@click.argument("pos", type=str)
+
+def nether(pos):
+    """Convertit des coordonnées du Nether en coordonnées de l'Overworld."""
+    try:
+        coords = re.split(r'[;,]', pos)
+        if len(coords) != 3:
+            raise ValueError("Les coordonnées doivent être au format X,Y,Z ou X;Y;Z.")
+        
+        x, y, z = float(coords[0]), float(coords[1]), float(coords[2])
+        
+        nether_x = x / 8
+        nether_z = z / 8
+        click.echo(click.style(f"Coordonnées Nether : {nether_x:.0f}, {y:.0f}, {nether_z:.0f}", fg="green"))
+    except Exception as e:
+        click.echo(click.style(f"Erreur : {e}", fg="red"))
+
+@cli.command("overworld")
+@click.argument("pos", type=str)
+
+def overworld(pos):
+    """Convertit des coordonnées de l'Overworld en coordonnées du Nether."""
+    try:
+        coords = re.split(r'[;,]', pos)
+        if len(coords) != 3:
+            raise ValueError("Les coordonnées doivent être au format X,Y,Z ou X;Y;Z.")
+        
+        x, y, z = float(coords[0]), float(coords[1]), float(coords[2])
+        
+        overworld_x = x * 8
+        overworld_z = z * 8
+        click.echo(click.style(f"Coordonnées Overworld : {overworld_x:.0f}, {y:.0f}, {overworld_z:.0f}", fg="green"))
+    except Exception as e:
+        click.echo(click.style(f"Erreur : {e}", fg="red"))
+
 # === SPAM ===
 @cli.command("emjspam")
 @click.argument("char", type=str)
@@ -583,11 +623,78 @@ def passgen(length, no_specials, no_numbers, no_uppercase, no_lowercase):
 
 # === MC SEED GENERATOR ==
 @cli.command("seedgen")
-def seedgen():
+@click.option("--string", default=None, help="Chaîne de caractères pour générer la seed.")
+def seedgen(string):
     """Génère une seed aléatoire pour la génération de monde Minecraft."""
-    seed = random.randint(-2**63, 2**63-1)
+    if string is None:
+        seed = random.randint(-2**63, 2**63-1)
+    else:
+        seed = hash(string) % (2**63)
     click.echo(click.style(f"Seed Minecraft générée : {seed}", fg="green", bold=True))
-    
+
+
+# === STARTUP MENU ===
+@cli.group()
+def startup_menu():
+    """Modifie le menu de démarrage Windows."""
+    pass
+
+@startup_menu.command("open")
+def open_startup_menu():
+    """Ouvre le menu de démarrage Windows."""
+    startup_menu_path = r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs"
+    if os.path.exists(startup_menu_path):
+        os.startfile(startup_menu_path)
+
+# === TXT TOOLS ===
+@cli.group()
+def txt():
+    """Sous-groupe pour les fichiers texte."""
+    pass
+
+@txt.command("fusion")
+@click.argument("file1", type=click.Path(exists=True))
+@click.argument("file2", type=click.Path(exists=True))
+@click.option("--output", "-o", default="output.txt", help="Nom du fichier de sortie.")
+@click.option("--lower", is_flag=True, help="Convertit tous les mots en minuscules.")
+@click.option("--clean", is_flag=True, help="Exclut les mots contenant des apostrophes, tirets ou esperluettes.")
+def fusion(file1, file2, output, lower, clean):
+    """Fusionne deux dictionnaires, retire les doublons et trie par ordre alphabétique."""
+    try:
+        mots_uniques = set()
+        # Caractères à bannir si --clean est activé
+        forbidden_chars = ("'", "-", "&")
+
+        for filename in [file1, file2]:
+            with open(filename, 'r', encoding='utf-8') as f:
+                for ligne in f:
+                    mot = ligne.strip()
+                    if not mot:
+                        continue
+                    
+                    # Option --clean : on vérifie si un caractère banni est présent
+                    if clean and any(char in mot for char in forbidden_chars):
+                        continue
+
+                    # Option --lower
+                    if lower:
+                        mots_uniques.add(mot.lower())
+                    else:
+                        mots_uniques.add(mot)
+
+        # Tri alphabétique insensible à la casse (A avant b)
+        liste_triee = sorted(mots_uniques, key=str.lower)
+
+        with open(output, 'w', encoding='utf-8') as f_out:
+            for mot in liste_triee:
+                f_out.write(mot + '\n')
+
+        click.echo(f"{len(mots_uniques)} enregistrés dans '{output}'.")
+
+    except Exception as e:
+        click.echo(f"Une erreur est survenue : {e}", err=True)
+
+
 # === LANCEMENT ===
 if __name__ == "__main__":
     cli()
